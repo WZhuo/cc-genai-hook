@@ -10,7 +10,7 @@ OpenTelemetry GenAI spans to any OTLP HTTP/protobuf backend.
 - Deterministic trace/span IDs: repeated hook runs produce the same IDs.
 - Content is redacted/truncated and can be disabled.
 
-## M1 scope
+## Implemented scope
 
 Implemented in M1:
 
@@ -22,13 +22,16 @@ Implemented in M1:
 - `install`, `uninstall`, `doctor`, `config`, `seed`, and `hook` CLI commands.
 - Dry-run exporter for local verification.
 
-Not implemented yet (planned for M2/M3/M4):
+Implemented in M2 (command mode, no sidecar):
 
-- **M2 — richer content in command mode (no sidecar):**
-  - `PostToolUse` / `PostToolUseFailure` command hooks.
-  - `execute_tool` spans with tool name, call ID, arguments, result, error and duration.
-  - Deterministic tool span IDs and `tool_use_id` idempotency.
-  - `requestRef`, `gen_ai.response.model`, tool-call/tool-result blocks in messages.
+- `PostToolUse` / `PostToolUseFailure` command hooks.
+- `execute_tool` spans with tool name, call ID, arguments, result, error and duration.
+- Deterministic tool span IDs and `tool_use_id` idempotency.
+- `error.type`, `is_interrupt`, and tool failure status.
+- Tool spans attach to the turn's segment 0 root.
+
+Not implemented yet (planned for M3/M4):
+
 - **M3 — sidecar real-time mode + subagents:**
   - Sidecar/HTTP hooks, open segment spans, real-time `PostToolUse`.
   - Subagent `agent_transcript_path`, Agent tool mapping, same trace.
@@ -134,7 +137,7 @@ cc-genai-hook doctor [--send-test]
 cc-genai-hook config show
 cc-genai-hook config validate
 cc-genai-hook seed --session-id ID --transcript PATH
-cc-genai-hook hook stop|session_end|subagent_stop|seed
+cc-genai-hook hook stop|session_end|subagent_stop|post_tool_use|post_tool_use_failure|seed
 ```
 
 `seed` marks an existing transcript as already emitted, avoiding a backfill burst.

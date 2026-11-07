@@ -502,6 +502,8 @@ trace_id = hash(session_id + prompt_id)
 
 `invoke_agent → chat → execute_tool` 不作为 v1 的目标；如果后续有明确需求，可以作为可选扩展（批量模式或 transcript 查找），不改变默认拓扑。
 
+**M2 command 模式限制**：`PostToolUse` 在 Stop 之前触发，无法可靠知道当前 segment seq，因此 M2 的 tool span 固定挂到 segment 0 root。M3 sidecar 会维护 open segment，把 tool span 挂到当前 segment。
+
 ### 7.2 Segment 策略
 
 **已确认决策：per-turn trace；一个 user turn 可能因 Stop hook 继续而分成多个 segment。**
@@ -1066,11 +1068,11 @@ invoke_agent (parent turn / segment)
 
 | 阶段 | 内容 |
 | --- | --- |
-| M1 | **Command 基线模式**：确定性 ID + state + transcript parser + Stop 批量发 chat/root |
-| M2 | **Command 丰富内容模式**：PostToolUse/Failure command hooks、execute_tool spans、工具入参/返回/错误/耗时；不引入 sidecar |
-| M3 | **Sidecar 实时模式 + 子代理**：hookd + HTTP hooks、open segment span、实时 PostToolUse；SubagentStart/Stop、agent_transcript_path、Agent tool 映射（同一 trace） |
-| M4 | outbox 重试、脱敏、采样、doctor、测试 |
-| M5 | 灰度上线、后端看板、文档 |
+| M1 ✅ | **Command 基线模式**：确定性 ID + state + transcript parser + Stop 批量发 chat/root |
+| M2 ✅ | **Command 丰富内容模式**：PostToolUse/Failure command hooks、execute_tool spans、工具入参/返回/错误/耗时；不引入 sidecar |
+| M3 ⏳ | **Sidecar 实时模式 + 子代理**：hookd + HTTP hooks、open segment span、实时 PostToolUse；SubagentStart/Stop、agent_transcript_path、Agent tool 映射（同一 trace） |
+| M4 ⏳ | outbox 重试、脱敏、采样、doctor、测试 |
+| M5 ⏳ | 灰度上线、后端看板、文档 |
 
 交付顺序：M1 先交付可独立运行的 command 模式；M2 在 command 模式下补齐 `execute_tool` 和工具内容；M3 再引入 sidecar 提供跨事件 open span 和实时工具 span。两种模式共用 core、配置和属性映射。
 
@@ -1082,9 +1084,11 @@ invoke_agent (parent turn / segment)
 4. **默认**：加 kill switch `CC_GENAI_HOOK_ENABLED=0`。
 5. **监控**：events received、spans emitted、export failures、queue depth、duplicate drops。
 
-### 15.3 M1 实现状态（2026-11-04）
+### 15.3 M1/M2 实现状态（2026-11-07）
 
-M1 代码位于 `cc-genai-hook/`：
+代码位于 `cc-genai-hook/`。
+
+M1 已完成：
 
 - ✅ `command` 模式：`Stop` + `SessionEnd` hooks
 - ✅ transcript 解析、`promptId` turn 分组、assistant 行合并
@@ -1095,9 +1099,17 @@ M1 代码位于 `cc-genai-hook/`：
 - ✅ `install` / `uninstall` / `doctor` / `config` / `seed` / `hook` CLI
 - ✅ dry-run JSONL 和本地 OTLP receiver 验证
 
-M1 暂不包含（按里程碑）：
+M2 已完成：
 
-- ⏳ `PostToolUse` / `PostToolUseFailure`、`execute_tool` spans、工具入参/返回/错误/耗时（M2，仍为 command 模式）
+- ✅ `PostToolUse` / `PostToolUseFailure` command hooks
+- ✅ `execute_tool` spans：工具名、call ID、入参、返回、错误、耗时
+- ✅ 确定性 tool span ID + `tool_use_id` 幂等
+- ✅ `error.type` / `is_interrupt` / `tool.success`
+- ✅ tool span 挂到当前 turn 的 segment 0 root；多 segment turn 的精确挂载留给 M3 sidecar
+- ✅ 31 个单元/集成测试通过
+
+M3/M4 暂不包含：
+
 - ⏳ sidecar/HTTP hooks、实时 open span（M3）
 - ⏳ 子代理 `agent_transcript_path`、Agent tool 映射、同一 trace（M3）
 - ⏳ durable outbox、采样、完整脱敏、TTL 清理（M4）

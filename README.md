@@ -22,13 +22,16 @@ OpenTelemetry GenAI semantic conventions 的 span，并导出到**任意 OTLP HT
 - `install`、`uninstall`、`doctor`、`config`、`seed`、`hook` CLI
 - dry-run JSONL、本地 OTLP receiver 示例
 
-**M2 / M3 / M4（计划中）**
+**M2（已完成）**
 
-- M2：**丰富 trace 内容（command 模式，不引入 sidecar）**
-  - `PostToolUse` / `PostToolUseFailure` command hooks
-  - `execute_tool` spans：工具名、调用 ID、入参、返回、错误、耗时
-  - 确定性 tool span ID + `tool_use_id` 幂等
-  - 补齐 `requestRef`、`gen_ai.response.model`、工具调用/结果 block
+- `PostToolUse` / `PostToolUseFailure` command hooks
+- `execute_tool` spans：工具名、调用 ID、入参、返回、错误、耗时
+- 确定性 tool span ID + `tool_use_id` 幂等
+- `error.type`、`is_interrupt`、工具失败状态
+- 工具 span 挂在当前 turn 的 segment 0 root 下
+
+**M3 / M4（计划中）**
+
 - M3：**sidecar 实时模式 + 子代理**
   - sidecar/HTTP hooks、open segment span、实时 `PostToolUse`
   - 子代理 `agent_transcript_path`、Agent tool 映射、同一 trace
@@ -46,6 +49,13 @@ Claude Code
   │      │ 读 transcript JSONL
   │      │ 按 promptId 分组 assistant 消息
   │      │ 生成 invoke_agent / chat spans
+  │      │
+  ├─ PostToolUse / PostToolUseFailure command hook
+  │      │
+  │      ▼
+  │  cc-genai-hook hook post_tool_use
+  │      │ 生成 execute_tool span
+  │      │
   │      ▼
   │  OTLP HTTP/protobuf
   │      │
@@ -57,18 +67,13 @@ trace 拓扑：
 
 ```text
 invoke_agent（segment root）
-└── chat（每条 assistant 消息）
+├── chat（每条 assistant 消息）
+└── execute_tool（每次工具调用）
 ```
 
-M2 会在 command 模式下增加：
-
-```text
-invoke_agent
-├── chat
-└── execute_tool
-```
-
-M3 再把 sidecar 加进来，提供跨事件 open span 和实时工具 span。
+M2 的 command 模式下，工具 span 使用确定性 ID，并挂到当前 turn 的
+segment 0 root。M3 的 sidecar 会提供跨事件 open span，从而支持多 segment
+turn 的精确实时挂载。
 
 ## 安装
 
@@ -118,7 +123,7 @@ cc-genai-hook install \
 
 ```text
 ~/.claude/genai-hook.json         # 0600
-~/.claude/settings.json           # 合并 Stop / SessionEnd hooks，并自动备份
+~/.claude/settings.json           # 合并 Stop / SessionEnd / PostToolUse / PostToolUseFailure hooks，并自动备份
 ```
 
 安装器**不会**写入 `CLAUDE_CODE_ENABLE_TELEMETRY`、`OTEL_TRACES_EXPORTER`、
@@ -262,7 +267,7 @@ cc-genai-hook doctor [--send-test]
 cc-genai-hook config show [--redact]
 cc-genai-hook config validate
 cc-genai-hook seed --session-id ID --transcript PATH
-cc-genai-hook hook stop|session_end|subagent_stop|seed
+cc-genai-hook hook stop|session_end|subagent_stop|post_tool_use|post_tool_use_failure|seed
 ```
 
 M1 只实现了 `--mode command`。`--mode sidecar` 会在 M3 提供。
@@ -304,6 +309,25 @@ cc-genai-hook seed --session-id <session-id> --transcript <transcript-path>
 - `claude_code.genai_hook.request_ref`
 - `claude_code.genai_hook.timing.source=transcript`
 
+### `execute_tool`
+
+- `gen_ai.operation.name=execute_tool`
+- `gen_ai.provider.name=anthropic`
+- `gen_ai.tool.name`
+- `gen_ai.tool.call.id`
+- `gen_ai.tool.call.arguments`
+- `gen_ai.tool.call.result`
+- `gen_ai.conversation.id`
+- `error.type`：失败时为 `tool_error` 或 `interrupted`
+- `claude_code.genai_hook.tool.duration_ms`
+- `claude_code.genai_hook.tool.success`
+- `claude_code.genai_hook.tool.is_interrupt`
+- `claude_code.genai_hook.tool.error`
+- `claude_code.genai_hook.tool.parent_segment=0`
+
+工具内容同样受 `content.mode`、`max_tool_chars`、`redact_patterns` 控制；
+截断时写 `claude_code.genai_hook.tool.*.truncated=true`。
+
 ### 内容处理
 
 - `content.mode=last_turn`：只发当前 turn。
@@ -316,10 +340,11 @@ cc-genai-hook seed --session-id <session-id> --transcript <transcript-path>
 ## 状态与幂等
 
 - 状态目录：`~/.claude/state/genai-hook/`
-- SQLite 表：`sessions`、`segments`、`messages`
+- SQLite 表：`sessions`、`segments`、`messages`、`tools`
 - 以 `(session_id, message_id)` 为幂等键，重复 Stop/SessionEnd 不会重复发 chat。
+- 以 `(session_id, tool_use_id)` 为幂等键，重复 PostToolUse/PostToolUseFailure 不会重复发 tool。
 - 确定性 span_id 作为第二层保护：即使状态丢失，重放也会得到相同 ID。
-- `segments` 在导出成功后才标记完成；flush 失败不会把消息标记为已处理。
+- `segments` 在导出成功后才标记完成；flush 失败不会把消息/tool 标记为已处理。
 
 ## 安全与隐私
 
@@ -354,16 +379,16 @@ cc-genai-hook/
 PYTHONPATH=src python3 -m pytest -q
 ```
 
-当前测试：25 passed。
+当前测试：31 passed。
 
 ## Roadmap
 
 | 阶段 | 内容 |
 | --- | --- |
-| M1 | command 模式、Stop/SessionEnd、chat/root spans、SQLite 幂等 |
-| M2 | command 模式丰富内容：PostToolUse/Failure、execute_tool、工具入参/返回/错误/耗时 |
-| M3 | sidecar/HTTP hooks、实时 open span、子代理 agent_transcript_path、Agent tool 映射、同一 trace |
-| M4 | durable outbox、采样、完整脱敏、TTL 清理 |
+| M1 | ✅ command 模式、Stop/SessionEnd、chat/root spans、SQLite 幂等 |
+| M2 | ✅ command 模式丰富内容：PostToolUse/Failure、execute_tool、工具入参/返回/错误/耗时 |
+| M3 | ⏳ sidecar/HTTP hooks、实时 open span、子代理 agent_transcript_path、Agent tool 映射、同一 trace |
+| M4 | ⏳ durable outbox、采样、完整脱敏、TTL 清理 |
 
 详细设计见 [`docs/design.md`](docs/design.md)。
 

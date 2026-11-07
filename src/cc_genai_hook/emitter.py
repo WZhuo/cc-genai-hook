@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 import platform
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from opentelemetry import trace as trace_api
+from opentelemetry.trace import Status, StatusCode
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
@@ -21,8 +23,20 @@ from opentelemetry.sdk.trace.export import (
 )
 
 from . import __version__
-from .genai import ContentProcessor, chat_attributes, root_attributes, ts_ns
-from .ids import DeterministicIdGenerator, set_ids, span_id, trace_id
+from .genai import (
+    ContentProcessor,
+    chat_attributes,
+    root_attributes,
+    tool_attributes,
+    ts_ns,
+)
+from .ids import (
+    DeterministicIdGenerator,
+    parent_context,
+    set_ids,
+    span_id,
+    trace_id,
+)
 from .transcript import TimelineItem
 
 
@@ -190,6 +204,65 @@ def emit_turn(
 
     root.end(end_time=max(max_end, root_start + 1))
     return emitted
+
+
+def emit_tool_span(
+    bundle: TracerBundle,
+    session_id: str,
+    prompt_id: str,
+    tool_use_id: str,
+    tool_name: str,
+    tool_input: Any,
+    tool_response: Any,
+    error: Optional[str],
+    is_interrupt: bool,
+    duration_ms: Any,
+    content: ContentProcessor,
+    compat: Dict[str, Any],
+    parent_segment: int = 0,
+) -> int:
+    """Emit one execute_tool span and return its deterministic span ID.
+
+    M2 command mode parents tool spans to segment 0 of the turn.  The current
+    segment for multi-Stop turns is supplied by the M3 sidecar.
+    """
+
+    tid = trace_id(session_id, prompt_id)
+    parent_sid = span_id(
+        "invoke_agent", "%s:%s:%d" % (session_id, prompt_id, parent_segment)
+    )
+    tool_sid = span_id("execute_tool", tool_use_id)
+    attrs = tool_attributes(
+        tool_name,
+        tool_use_id,
+        tool_input,
+        tool_response,
+        error,
+        is_interrupt,
+        duration_ms,
+        session_id,
+        prompt_id,
+        parent_segment,
+        content,
+        compat,
+    )
+    end = time.time_ns()
+    start = end - int(duration_ms or 0) * 1_000_000
+    if start >= end:
+        start = end - 1
+    set_ids(tid, tool_sid)
+    span = bundle.tracer.start_span(
+        "execute_tool",
+        context=parent_context(tid, parent_sid),
+        start_time=start,
+        attributes=attrs,
+    )
+    if error is not None:
+        span.set_status(Status(StatusCode.ERROR))
+    else:
+        span.set_status(Status(StatusCode.OK))
+    span.end(end_time=end)
+    return tool_sid
 
 
 def emit_test_span(bundle: TracerBundle) -> None:

@@ -21,6 +21,30 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cc-genai-hook hook post_tool_use",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cc-genai-hook hook post_tool_use_failure",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

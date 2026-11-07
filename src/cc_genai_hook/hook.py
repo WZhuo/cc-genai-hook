@@ -13,13 +13,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config import ConfigError, load_config
-from .emitter import build_tracer, emit_turn, flush
+from .emitter import build_tracer, emit_tool_span, emit_turn, flush
 from .genai import ContentProcessor, ts_ns
 from .ids import trace_id
 from .state import StateStore
 from .transcript import (
     TimelineItem,
     build_timeline,
+    is_prompt,
     latest_prompt,
     load_rows,
 )
@@ -72,6 +73,79 @@ def _session_meta(timeline: List[TimelineItem]) -> Dict[str, Optional[str]]:
         if version and cwd:
             break
     return {"version": version, "cwd": cwd}
+
+
+def _resolve_prompt_id(payload: Dict[str, Any]) -> str:
+    prompt_id = payload.get("prompt_id")
+    if prompt_id:
+        return str(prompt_id)
+    transcript = str(payload.get("transcript_path") or "")
+    if transcript and os.path.exists(transcript):
+        try:
+            timeline, _ = build_timeline(load_rows(transcript))
+            for item in reversed(timeline):
+                if item.kind == "user" and item.prompt_id and is_prompt(item):
+                    return str(item.prompt_id)
+        except Exception:
+            pass
+    return "session"
+
+
+def handle_tool(
+    payload: Dict[str, Any], event: str, config: Dict[str, Any]
+) -> HookResult:
+    session_id = str(payload.get("session_id") or "")
+    tool_use_id = str(payload.get("tool_use_id") or "")
+    if not session_id or not tool_use_id:
+        result = HookResult(
+            event=event, error="missing session_id or tool_use_id"
+        )
+        _log(config, result.error or "missing input", error=True)
+        return result
+    if not config.get("emit", {}).get("execute_tool", True):
+        return HookResult(event=event, skipped=1)
+
+    prompt_id = _resolve_prompt_id(payload)
+    transcript = str(payload.get("transcript_path") or "")
+    state = StateStore(config["state"]["dir"])
+    try:
+        state.ensure_session(
+            session_id,
+            transcript or None,
+        )
+        if state.tool_emitted(session_id, tool_use_id):
+            return HookResult(event=event, skipped=1)
+
+        content = ContentProcessor(config["content"])
+        compat = config.get("compat") or {}
+        bundle = build_tracer(config)
+        failed = event == "post_tool_use_failure"
+        error = payload.get("error") if failed else None
+        if failed and error is None:
+            error = "tool error"
+        tool_sid = emit_tool_span(
+            bundle,
+            session_id,
+            prompt_id,
+            tool_use_id,
+            str(payload.get("tool_name") or ""),
+            payload.get("tool_input"),
+            payload.get("tool_response"),
+            error,
+            bool(payload.get("is_interrupt")),
+            payload.get("duration_ms"),
+            content,
+            compat,
+        )
+        if not flush(bundle):
+            _log(config, "flush failed; tool left unprocessed", error=True)
+            return HookResult(
+                event=event, flush_ok=False, error="flush failed"
+            )
+        state.mark_tool(session_id, tool_use_id, prompt_id, tool_sid)
+        return HookResult(event=event, emitted=1)
+    finally:
+        state.close()
 
 
 def handle_seed(payload: Dict[str, Any], config: Dict[str, Any]) -> HookResult:
@@ -239,6 +313,21 @@ def run(event: str) -> int:
             return 0
         if event == "seed":
             handle_seed(payload, config)
+            return 0
+        if event in ("post_tool_use", "post_tool_use_failure"):
+            result = handle_tool(payload, event, config)
+            _log(
+                config,
+                "done event=%s emitted=%d skipped=%d flush_ok=%s error=%s"
+                % (
+                    event,
+                    result.emitted,
+                    result.skipped,
+                    result.flush_ok,
+                    result.error,
+                ),
+                error=bool(result.error),
+            )
             return 0
         if event in ("stop", "session_end", "subagent_stop"):
             result = handle_stop(payload, event, config)

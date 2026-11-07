@@ -21,6 +21,19 @@ def test_segments_messages_and_idempotency(tmp_path):
         store.close()
 
 
+def test_tool_idempotency(tmp_path):
+    store = StateStore(str(tmp_path / "state"))
+    try:
+        tool_sid = span_id("execute_tool", "t1")
+        assert store.tool_emitted("s1", "t1") is False
+        store.mark_tool("s1", "t1", "p1", tool_sid)
+        store.mark_tool("s1", "t1", "p1", tool_sid)
+        assert store.tool_emitted("s1", "t1") is True
+        assert store.tool_count() == 1
+    finally:
+        store.close()
+
+
 def test_seed_marks_all_messages(tmp_path):
     store = StateStore(str(tmp_path / "state"))
     try:

@@ -66,8 +66,10 @@ def _hook_command(event: str) -> str:
     )
 
 
-def _entry(event: str, timeout: int) -> Dict[str, Any]:
-    return {
+def _entry(
+    event: str, timeout: int, matcher: Optional[str] = None
+) -> Dict[str, Any]:
+    entry: Dict[str, Any] = {
         "hooks": [
             {
                 "type": "command",
@@ -76,6 +78,9 @@ def _entry(event: str, timeout: int) -> Dict[str, Any]:
             }
         ]
     }
+    if matcher is not None:
+        entry["matcher"] = matcher
+    return entry
 
 
 def _is_ours(entry: Dict[str, Any]) -> bool:
@@ -168,6 +173,12 @@ def install(args: argparse.Namespace) -> int:
     hooks["SessionEnd"] = _strip_ours(list(hooks.get("SessionEnd") or [])) + [
         _entry("session_end", 30)
     ]
+    hooks["PostToolUse"] = _strip_ours(list(hooks.get("PostToolUse") or [])) + [
+        _entry("post_tool_use", 30, "*")
+    ]
+    hooks["PostToolUseFailure"] = _strip_ours(
+        list(hooks.get("PostToolUseFailure") or [])
+    ) + [_entry("post_tool_use_failure", 30, "*")]
     settings["hooks"] = hooks
 
     if getattr(args, "dry_run", False):
@@ -186,7 +197,9 @@ def install(args: argparse.Namespace) -> int:
         print("[ok] config backup: %s" % config_backup)
     if backup:
         print("[ok] settings backup: %s" % backup)
-    print("[ok] hooks installed: Stop, SessionEnd")
+    print(
+        "[ok] hooks installed: Stop, SessionEnd, PostToolUse, PostToolUseFailure"
+    )
     print("[next] run: cc-genai-hook doctor --send-test")
     return 0
 
@@ -196,7 +209,13 @@ def uninstall(args: argparse.Namespace) -> int:
     settings = _read_json(settings_path)
     hooks = dict(settings.get("hooks") or {})
     removed = 0
-    for event in ("Stop", "SessionEnd", "SubagentStop"):
+    for event in (
+        "Stop",
+        "SessionEnd",
+        "SubagentStop",
+        "PostToolUse",
+        "PostToolUseFailure",
+    ):
         entries = list(hooks.get(event) or [])
         kept = _strip_ours(entries)
         removed += len(entries) - len(kept)

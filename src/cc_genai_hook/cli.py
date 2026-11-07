@@ -63,7 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     hook_p = sub.add_parser("hook", help="internal hook entrypoint")
     hook_p.add_argument(
-        "event", choices=["stop", "session_end", "subagent_stop", "seed"]
+        "event",
+        choices=[
+            "stop",
+            "session_end",
+            "subagent_stop",
+            "post_tool_use",
+            "post_tool_use_failure",
+            "seed",
+        ],
     )
     hook_p.set_defaults(func=lambda args: run_hook(args.event))
 

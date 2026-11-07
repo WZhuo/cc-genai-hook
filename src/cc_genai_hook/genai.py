@@ -170,6 +170,63 @@ def chat_attributes(
     return attrs
 
 
+def tool_attributes(
+    tool_name: str,
+    tool_use_id: str,
+    tool_input: Any,
+    tool_response: Any,
+    error: Optional[str],
+    is_interrupt: bool,
+    duration_ms: Any,
+    session_id: str,
+    prompt_id: str,
+    parent_segment: int,
+    content: ContentProcessor,
+    compat: Dict[str, Any],
+) -> Dict[str, Any]:
+    attrs: Dict[str, Any] = {
+        "gen_ai.operation.name": "execute_tool",
+        **_provider_attributes(compat),
+        "gen_ai.tool.name": tool_name or "",
+        "gen_ai.tool.call.id": tool_use_id or "",
+        "gen_ai.conversation.id": session_id,
+        "claude_code.genai_hook.tool.duration_ms": int(duration_ms or 0),
+        "claude_code.genai_hook.tool.parent_segment": parent_segment,
+    }
+    if prompt_id:
+        attrs["claude_code.genai_hook.turn.prompt_id"] = prompt_id
+
+    if content.mode != "none":
+        args_text, args_cut = content.clean(as_text(tool_input), content.max_tool)
+        attrs["gen_ai.tool.call.arguments"] = args_text
+        if args_cut:
+            attrs["claude_code.genai_hook.tool.arguments.truncated"] = True
+
+        if error is None and tool_response is not None:
+            result_text, result_cut = content.clean(
+                as_text(tool_response), content.max_tool
+            )
+            attrs["gen_ai.tool.call.result"] = result_text
+            if result_cut:
+                attrs["claude_code.genai_hook.tool.result.truncated"] = True
+
+    if error is not None:
+        attrs["error.type"] = "interrupted" if is_interrupt else "tool_error"
+        attrs["claude_code.genai_hook.tool.success"] = False
+        if is_interrupt:
+            attrs["claude_code.genai_hook.tool.is_interrupt"] = True
+        if content.mode != "none":
+            error_text, error_cut = content.clean(
+                as_text(error), content.max_tool
+            )
+            attrs["claude_code.genai_hook.tool.error"] = error_text
+            if error_cut:
+                attrs["claude_code.genai_hook.tool.error.truncated"] = True
+    else:
+        attrs["claude_code.genai_hook.tool.success"] = True
+    return attrs
+
+
 def root_attributes(
     messages: List[TimelineItem],
     prompt_item: Optional[TimelineItem],

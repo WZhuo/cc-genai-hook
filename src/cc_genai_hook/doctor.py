@@ -94,10 +94,14 @@ def doctor(args: argparse.Namespace) -> int:
         try:
             healthy = store.health()
             counts = store.counts()
+            tools = store.tool_count()
         finally:
             store.close()
         if healthy:
-            print("[ok] state: healthy (sessions=%d segments=%d messages=%d)" % counts)
+            print(
+                "[ok] state: healthy (sessions=%d segments=%d messages=%d tools=%d)"
+                % (counts + (tools,))
+            )
         else:
             errors.append("state database is not healthy")
     except Exception as exc:

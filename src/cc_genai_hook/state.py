@@ -49,6 +49,15 @@ CREATE TABLE IF NOT EXISTS messages (
   emitted_at      TEXT,
   PRIMARY KEY (session_id, message_id)
 );
+
+CREATE TABLE IF NOT EXISTS tools (
+  session_id      TEXT NOT NULL,
+  tool_use_id     TEXT NOT NULL,
+  prompt_id       TEXT,
+  span_id         BLOB,
+  emitted_at      TEXT,
+  PRIMARY KEY (session_id, tool_use_id)
+);
 """
 
 
@@ -207,6 +216,42 @@ class StateStore:
                 """,
                 [(session_id, message_id, prompt_id, now) for message_id, prompt_id in message_ids],
             )
+
+    def tool_emitted(self, session_id: str, tool_use_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM tools WHERE session_id=? AND tool_use_id=?",
+                (session_id, tool_use_id),
+            ).fetchone()
+        return row is not None
+
+    def mark_tool(
+        self,
+        session_id: str,
+        tool_use_id: str,
+        prompt_id: str,
+        span_id: int,
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO tools(session_id, tool_use_id, prompt_id, span_id, emitted_at)
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, tool_use_id) DO NOTHING
+                """,
+                (
+                    session_id,
+                    tool_use_id,
+                    prompt_id,
+                    int(span_id).to_bytes(8, "big"),
+                    _now(),
+                ),
+            )
+
+    def tool_count(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) FROM tools").fetchone()
+        return int(row[0]) if row else 0
 
     def health(self) -> bool:
         try:
