@@ -24,11 +24,15 @@ Implemented in M1:
 
 Implemented in M2 (command mode, no sidecar):
 
-- `PostToolUse` / `PostToolUseFailure` command hooks.
+- **ordered mode (default):** Stop emits chat + execute_tool in transcript order.
+  - One shared step counter per turn: `#1`, `#2`, `#3`...
+  - Each activity starts at the previous activity end + 1 ms.
+  - `claude_code.genai_hook.step_index` / `step_name` / `plan_step`.
+- **realtime mode (optional):** `PostToolUse` / `PostToolUseFailure` command hooks.
 - `execute_tool` spans with tool name, call ID, arguments, result, error and duration.
 - Deterministic tool span IDs and `tool_use_id` idempotency.
 - `error.type`, `is_interrupt`, and tool failure status.
-- Tool spans attach to the turn's segment 0 root.
+- Chat and tool spans are siblings under the turn root.
 
 Not implemented yet (planned for M3/M4):
 

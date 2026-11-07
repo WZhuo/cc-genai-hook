@@ -212,7 +212,9 @@ Claude Code
   "hook": {
     "sample_rate": 1.0,
     "dry_run": false,
-    "debug": false
+    "debug": false,
+    "agent_name": "claude-code",
+    "tool_mode": "ordered"
   },
 
   "state": {
@@ -525,6 +527,30 @@ root_span   = hash("invoke_agent", session_id + prompt_id + seq)
 - 父 span 不会早于子 span 结束；
 - Stop 继续后新 span 不会挂到已结束的 root；
 - 同一 turn 不会重复发 root。
+
+### 7.2.1 逻辑顺序（M2 ordered 模式）
+
+`hook.tool_mode=ordered` 是 M2 默认模式。Stop 时按 transcript 顺序统一生成
+chat 和 execute_tool：
+
+```text
+user prompt
+  ↓
+chat #1:   start = prev_end + 1ms，end = assistant 最后一行 timestamp
+tool #2:   start = chat #1 end + 1ms，end = tool_result timestamp
+chat #3:   start = tool #2 end + 1ms，end = assistant 最后一行 timestamp
+...
+invoke_agent root: start = user_ts，end = 所有 step 的最大 end
+```
+
+规则：
+
+- 一个 turn 内 chat/tool 共享 step counter（从 1 开始）。
+- 下一段活动从上一段结束 + 1ms 开始；若真实首条 timestamp 更早，则 clamp 到真实值。
+- `claude_code.genai_hook.step_index`、`step_name`、`plan_step` 记录逻辑顺序。
+- root 上的 `step_count` 记录总步骤数。
+- chat/tool 都是 root 的子 span，彼此是 sibling。
+- `hook.tool_mode=realtime` 保留 PostToolUse/Failure 实时发送 tool span；此时顺序由真实时间戳决定，不保证严格串行。
 
 ### 7.3 确定性 ID
 
@@ -1101,12 +1127,15 @@ M1 已完成：
 
 M2 已完成：
 
-- ✅ `PostToolUse` / `PostToolUseFailure` command hooks
+- ✅ **ordered 模式（默认）**：Stop 时按 transcript 顺序统一生成 chat + execute_tool
+- ✅ turn 内共享 step counter，`+1ms` 合成时间戳，`step_index` / `step_name` / `plan_step` / `step_count`
+- ✅ chat/tool 都是 root 的 sibling，父区间包含子区间
+- ✅ **realtime 模式（可选）**：`PostToolUse` / `PostToolUseFailure` command hooks
 - ✅ `execute_tool` spans：工具名、call ID、入参、返回、错误、耗时
 - ✅ 确定性 tool span ID + `tool_use_id` 幂等
 - ✅ `error.type` / `is_interrupt` / `tool.success`
-- ✅ tool span 挂到当前 turn 的 segment 0 root；多 segment turn 的精确挂载留给 M3 sidecar
-- ✅ 31 个单元/集成测试通过
+- ✅ tool span 挂到当前 turn 的 root；多 segment turn 的精确挂载留给 M3 sidecar
+- ✅ 33 个单元/集成测试通过
 
 M3/M4 暂不包含：
 

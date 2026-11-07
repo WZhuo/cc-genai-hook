@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     install_p.add_argument(
         "--content-mode", choices=["last_turn", "full", "none"], default="last_turn"
     )
+    install_p.add_argument(
+        "--tool-mode",
+        choices=["ordered", "realtime"],
+        default="ordered",
+        help="ordered emits tools at Stop with logical ordering; realtime uses PostToolUse hooks",
+    )
     install_p.add_argument("--dry-run", action="store_true")
     _add_common_config(install_p)
     install_p.set_defaults(func=install)

@@ -98,7 +98,7 @@ def test_failed_emit_aborts_reserved_segment(tmp_path, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("cc_genai_hook.hook.emit_turn", boom)
+    monkeypatch.setattr("cc_genai_hook.hook.emit_ordered_turn", boom)
     with pytest.raises(RuntimeError):
         handle_stop(
             {"session_id": "s1", "transcript_path": str(transcript)},

@@ -24,11 +24,15 @@ OpenTelemetry GenAI semantic conventions 的 span，并导出到**任意 OTLP HT
 
 **M2（已完成）**
 
-- `PostToolUse` / `PostToolUseFailure` command hooks
+- **ordered 模式（默认）**：Stop 时按 transcript 顺序统一生成 chat + execute_tool
+  - 每个 turn 内共享 step counter：`#1`、`#2`、`#3`…
+  - 下一段活动从上一段结束 +1ms 开始，保证时间轴严格串行
+  - `claude_code.genai_hook.step_index` / `step_name` / `plan_step`
+- **realtime 模式（可选）**：`PostToolUse` / `PostToolUseFailure` 实时发 tool span
 - `execute_tool` spans：工具名、调用 ID、入参、返回、错误、耗时
 - 确定性 tool span ID + `tool_use_id` 幂等
 - `error.type`、`is_interrupt`、工具失败状态
-- 工具 span 挂在当前 turn 的 segment 0 root 下
+- 工具 span 与 chat 一样挂在 turn root 下
 
 **M3 / M4（计划中）**
 
@@ -71,9 +75,12 @@ invoke_agent（segment root）
 └── execute_tool（每次工具调用）
 ```
 
-M2 的 command 模式下，工具 span 使用确定性 ID，并挂到当前 turn 的
-segment 0 root。M3 的 sidecar 会提供跨事件 open span，从而支持多 segment
-turn 的精确实时挂载。
+M2 默认使用 **ordered 模式**：Stop 时按 transcript 顺序统一生成 chat 和
+execute_tool，共享一个 step counter，并用 `+1ms` 合成时间戳保证严格顺序。
+也可以切换到 **realtime 模式**：用 PostToolUse/Failure command hooks 实时
+发送 tool span，工具 span 使用确定性 ID 并挂到 turn root。
+
+M3 的 sidecar 会提供跨事件 open span，从而支持多 segment turn 的精确实时挂载。
 
 ## 安装
 
@@ -123,7 +130,7 @@ cc-genai-hook install \
 
 ```text
 ~/.claude/genai-hook.json         # 0600
-~/.claude/settings.json           # 合并 Stop / SessionEnd / PostToolUse / PostToolUseFailure hooks，并自动备份
+~/.claude/settings.json           # 默认合并 Stop / SessionEnd；realtime 模式再加 PostToolUse / PostToolUseFailure，并自动备份
 ```
 
 安装器**不会**写入 `CLAUDE_CODE_ENABLE_TELEMETRY`、`OTEL_TRACES_EXPORTER`、
@@ -177,7 +184,8 @@ cc-genai-hook install \
     "sample_rate": 1.0,
     "dry_run": false,
     "debug": false,
-    "agent_name": "claude-code"
+    "agent_name": "claude-code",
+    "tool_mode": "ordered"
   },
   "state": {
     "dir": "~/.claude/state/genai-hook",
@@ -261,6 +269,7 @@ cc-genai-hook install [--mode command|sidecar|auto]
                       [--endpoint URL] [--endpoint-kind base|full]
                       [--header KEY=VALUE]... [--user NAME]
                       [--content-mode last_turn|full|none]
+                      [--tool-mode ordered|realtime]
                       [--dry-run]
 cc-genai-hook uninstall [--purge]
 cc-genai-hook doctor [--send-test]
@@ -269,6 +278,9 @@ cc-genai-hook config validate
 cc-genai-hook seed --session-id ID --transcript PATH
 cc-genai-hook hook stop|session_end|subagent_stop|post_tool_use|post_tool_use_failure|seed
 ```
+
+默认 `--tool-mode ordered`：Stop 时统一生成 chat/tool，保证顺序。  
+`--tool-mode realtime` 会额外注册 `PostToolUse` / `PostToolUseFailure`，工具 span 实时发送。
 
 M1 只实现了 `--mode command`。`--mode sidecar` 会在 M3 提供。
 
@@ -328,6 +340,18 @@ cc-genai-hook seed --session-id <session-id> --transcript <transcript-path>
 工具内容同样受 `content.mode`、`max_tool_chars`、`redact_patterns` 控制；
 截断时写 `claude_code.genai_hook.tool.*.truncated=true`。
 
+### 顺序属性
+
+ordered 模式下，一个 turn 内的 chat 和 tool 共享 step counter：
+
+- `claude_code.genai_hook.step_index`：从 1 开始的逻辑步骤号
+- `claude_code.genai_hook.step_name`：如 `plan (1 tool) #1`、`tool: read #2`、`response #3`
+- `claude_code.genai_hook.plan_step`：tool span 所属的 generation 步骤
+- `claude_code.genai_hook.step_count`：root span 上的总步骤数
+
+时间戳规则：下一段活动从上一段结束 +1ms 开始，并尽量 clamp 到真实首条
+timestamp，保证 trace 时间轴严格串行。
+
 ### 内容处理
 
 - `content.mode=last_turn`：只发当前 turn。
@@ -379,14 +403,14 @@ cc-genai-hook/
 PYTHONPATH=src python3 -m pytest -q
 ```
 
-当前测试：31 passed。
+当前测试：33 passed。
 
 ## Roadmap
 
 | 阶段 | 内容 |
 | --- | --- |
 | M1 | ✅ command 模式、Stop/SessionEnd、chat/root spans、SQLite 幂等 |
-| M2 | ✅ command 模式丰富内容：PostToolUse/Failure、execute_tool、工具入参/返回/错误/耗时 |
+| M2 | ✅ command 模式丰富内容：ordered step 顺序、PostToolUse/Failure（realtime）、execute_tool、工具入参/返回/错误/耗时 |
 | M3 | ⏳ sidecar/HTTP hooks、实时 open span、子代理 agent_transcript_path、Agent tool 映射、同一 trace |
 | M4 | ⏳ durable outbox、采样、完整脱敏、TTL 清理 |
 

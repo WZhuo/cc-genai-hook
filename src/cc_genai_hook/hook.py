@@ -13,7 +13,13 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config import ConfigError, load_config
-from .emitter import build_tracer, emit_tool_span, emit_turn, flush
+from .emitter import (
+    build_tracer,
+    emit_ordered_turn,
+    emit_tool_span,
+    emit_turn,
+    flush,
+)
 from .genai import ContentProcessor, ts_ns
 from .ids import trace_id
 from .state import StateStore
@@ -104,6 +110,10 @@ def handle_tool(
         return result
     if not config.get("emit", {}).get("execute_tool", True):
         return HookResult(event=event, skipped=1)
+    if config.get("hook", {}).get("tool_mode", "ordered") != "realtime":
+        # Ordered mode emits tools at Stop, together with generations, so the
+        # shared step counter can assign a stable order.
+        return HookResult(event=event, skipped=1)
 
     prompt_id = _resolve_prompt_id(payload)
     transcript = str(payload.get("transcript_path") or "")
@@ -190,7 +200,7 @@ def handle_stop(
         _log(config, result.error or "missing input", error=True)
         return result
 
-    timeline, _ = build_timeline(load_rows(transcript))
+    timeline, tool_results = build_timeline(load_rows(transcript))
     if not timeline:
         return HookResult(event=event, error="empty transcript")
 
@@ -201,6 +211,8 @@ def handle_stop(
             session_id, transcript, meta.get("version"), meta.get("cwd")
         )
         already = state.emitted_message_ids(session_id)
+        already_tools = state.emitted_tool_ids(session_id)
+        tool_mode = str(config.get("hook", {}).get("tool_mode") or "ordered")
 
         groups: "OrderedDict[str, List[TimelineItem]]" = OrderedDict()
         skipped = 0
@@ -227,6 +239,7 @@ def handle_stop(
             agent_id = str(payload.get("agent_id") or "") or None
 
         records: List[Tuple[str, str, int]] = []
+        tool_records: List[Tuple[str, str, int]] = []
         segments: List[Tuple[str, int]] = []
         committed = False
         try:
@@ -245,22 +258,42 @@ def handle_stop(
                     session_id, prompt_id, tid, started_ns
                 )
                 segments.append((prompt_id, existing))
-                records.extend(
-                    emit_turn(
+                if tool_mode == "ordered":
+                    chat_records, new_tool_records = emit_ordered_turn(
                         bundle,
                         session_id,
                         prompt_id,
                         existing,
                         prompt_item,
                         messages,
+                        tool_results,
                         timeline,
                         message_indices,
                         content,
                         compat,
                         agent_name=agent_name,
                         agent_id=agent_id,
+                        emitted_tool_ids=already_tools,
                     )
-                )
+                    records.extend(chat_records)
+                    tool_records.extend(new_tool_records)
+                else:
+                    records.extend(
+                        emit_turn(
+                            bundle,
+                            session_id,
+                            prompt_id,
+                            existing,
+                            prompt_item,
+                            messages,
+                            timeline,
+                            message_indices,
+                            content,
+                            compat,
+                            agent_name=agent_name,
+                            agent_id=agent_id,
+                        )
+                    )
 
             flush_ok = flush(bundle)
             if not flush_ok:
@@ -277,6 +310,8 @@ def handle_stop(
                 )
 
             state.mark_messages(session_id, records)
+            if tool_records:
+                state.mark_tools(session_id, tool_records)
             ended = time.time_ns()
             for prompt_id, seq in segments:
                 state.finish_segment(session_id, prompt_id, seq, ended)

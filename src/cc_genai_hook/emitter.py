@@ -7,7 +7,7 @@ import os
 import platform
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from opentelemetry import trace as trace_api
 from opentelemetry.trace import Status, StatusCode
@@ -25,6 +25,7 @@ from opentelemetry.sdk.trace.export import (
 from . import __version__
 from .genai import (
     ContentProcessor,
+    as_text,
     chat_attributes,
     root_attributes,
     tool_attributes,
@@ -136,6 +137,27 @@ def build_tracer(config: Dict[str, Any]) -> TracerBundle:
     )
 
 
+PLUS_1MS_NS = 1_000_000
+
+
+def _gen_step_name(
+    tool_count: int, has_text: bool, is_last: bool, step: int
+) -> str:
+    if tool_count:
+        return "plan (%d %s) #%d" % (
+            tool_count,
+            "tool" if tool_count == 1 else "tools",
+            step,
+        )
+    if has_text and is_last:
+        return "response #%d" % step
+    return "generation #%d" % step
+
+
+def _tool_step_name(tool_name: str, step: int) -> str:
+    return "tool: %s #%d" % ((tool_name or "unknown").lower(), step)
+
+
 def emit_turn(
     bundle: TracerBundle,
     session_id: str,
@@ -204,6 +226,184 @@ def emit_turn(
 
     root.end(end_time=max(max_end, root_start + 1))
     return emitted
+
+
+def emit_ordered_turn(
+    bundle: TracerBundle,
+    session_id: str,
+    prompt_id: str,
+    segment_seq: int,
+    prompt_item: Optional[TimelineItem],
+    messages: List[TimelineItem],
+    tool_results: Dict[str, Any],
+    timeline: List[TimelineItem],
+    message_indices: Dict[int, int],
+    content: ContentProcessor,
+    compat: Dict[str, Any],
+    agent_name: str = "claude-code",
+    agent_id: Optional[str] = None,
+    emitted_tool_ids: Optional[Set[str]] = None,
+) -> Tuple[List[Tuple[str, str, int]], List[Tuple[str, str, int]]]:
+    """Emit a turn with Litefuse-style logical ordering.
+
+    Generations and tools share one step counter.  The next activity starts at
+    the previous activity's end + 1 ms, clamped to the real first timestamp,
+    so the backend always sees a stable, non-overlapping order.
+    """
+
+    tid = trace_id(session_id, prompt_id)
+    root_sid = span_id(
+        "invoke_agent", "%s:%s:%d" % (session_id, prompt_id, segment_seq)
+    )
+    root_start = ts_ns(prompt_item.ts) if prompt_item else ts_ns(messages[0].ts)
+    root_attrs = root_attributes(
+        messages,
+        prompt_item,
+        session_id,
+        segment_seq,
+        agent_name,
+        content,
+        compat,
+        agent_id=agent_id,
+    )
+    set_ids(tid, root_sid)
+    root = bundle.tracer.start_span(
+        "invoke_agent",
+        start_time=root_start,
+        attributes=root_attrs,
+    )
+    root_ctx = trace_api.set_span_in_context(root)
+
+    emitted_tools = set(emitted_tool_ids or ())
+    chat_records: List[Tuple[str, str, int]] = []
+    tool_records: List[Tuple[str, str, int]] = []
+    counter = 0
+    prev_end = root_start
+    latest_end = root_start
+
+    for msg_index, item in enumerate(messages):
+        counter += 1
+        step = counter
+        tool_uses = [
+            block
+            for block in item.blocks
+            if block.get("type") == "tool_use"
+        ]
+        has_text = any(
+            block.get("type") == "text" and block.get("text")
+            for block in item.blocks
+        )
+        step_name = _gen_step_name(
+            len(tool_uses), has_text, msg_index == len(messages) - 1, step
+        )
+
+        msg_start = ts_ns(item.ts)
+        gen_start = prev_end + PLUS_1MS_NS
+        if msg_start and gen_start > msg_start:
+            gen_start = msg_start
+        gen_end = ts_ns(item.last_ts)
+        if gen_end < gen_start:
+            gen_end = gen_start
+
+        chat_sid = span_id("chat", item.message_id or "")
+        attrs = chat_attributes(
+            item,
+            message_indices.get(id(item), 0),
+            timeline,
+            session_id,
+            content,
+            compat,
+            step_index=step,
+            step_name=step_name,
+        )
+        set_ids(tid, chat_sid)
+        span = bundle.tracer.start_span(
+            "chat",
+            context=root_ctx,
+            start_time=gen_start,
+            attributes=attrs,
+        )
+        span.end(end_time=gen_end)
+        if item.message_id:
+            chat_records.append((item.message_id, prompt_id, chat_sid))
+
+        prev_end = gen_end
+        latest_end = max(latest_end, gen_end)
+        tool_start = gen_end + PLUS_1MS_NS
+        latest_tool_end: Optional[int] = None
+
+        for tool in tool_uses:
+            counter += 1
+            tool_step = counter
+            tool_use_id = str(tool.get("id") or "")
+            if not tool_use_id:
+                continue
+            result = tool_results.get(tool_use_id)
+            tool_end = (
+                ts_ns(result.ts) if result is not None and result.ts else tool_start
+            )
+            if tool_end < tool_start:
+                tool_end = tool_start
+            latest_tool_end = (
+                tool_end
+                if latest_tool_end is None
+                else max(latest_tool_end, tool_end)
+            )
+            latest_end = max(latest_end, tool_end)
+
+            if tool_use_id in emitted_tools:
+                continue
+
+            error = None
+            tool_response = None
+            if result is None:
+                error = "tool result missing"
+            elif result.is_error:
+                error = as_text(result.content) or "tool error"
+            else:
+                tool_response = result.content
+
+            tool_name = str(tool.get("name") or "")
+            duration_ms = max(0, (tool_end - tool_start) // 1_000_000)
+            tool_attrs = tool_attributes(
+                tool_name,
+                tool_use_id,
+                tool.get("input"),
+                tool_response,
+                error,
+                False,
+                duration_ms,
+                session_id,
+                prompt_id,
+                segment_seq,
+                content,
+                compat,
+                step_index=tool_step,
+                step_name=_tool_step_name(tool_name, tool_step),
+                plan_step=step,
+            )
+            tool_sid = span_id("execute_tool", tool_use_id)
+            set_ids(tid, tool_sid)
+            tool_span = bundle.tracer.start_span(
+                "execute_tool",
+                context=root_ctx,
+                start_time=tool_start,
+                attributes=tool_attrs,
+            )
+            if error is not None:
+                tool_span.set_status(Status(StatusCode.ERROR))
+            else:
+                tool_span.set_status(Status(StatusCode.OK))
+            tool_span.end(end_time=tool_end)
+            tool_records.append((tool_use_id, prompt_id, tool_sid))
+
+        if latest_tool_end is not None:
+            prev_end = max(prev_end, latest_tool_end)
+            latest_end = max(latest_end, latest_tool_end)
+
+    root.set_attribute("claude_code.genai_hook.step_count", counter)
+    root.end(end_time=max(latest_end, root_start + 1))
+    return chat_records, tool_records
 
 
 def emit_tool_span(

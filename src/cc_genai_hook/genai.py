@@ -127,6 +127,8 @@ def chat_attributes(
     session_id: str,
     content: ContentProcessor,
     compat: Dict[str, Any],
+    step_index: Optional[int] = None,
+    step_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     attrs: Dict[str, Any] = {
         "gen_ai.operation.name": "chat",
@@ -142,6 +144,10 @@ def chat_attributes(
     attrs.update(_usage_attributes(item.usage, compat))
     if item.request_ref:
         attrs["claude_code.genai_hook.request_ref"] = item.request_ref
+    if step_index is not None:
+        attrs["claude_code.genai_hook.step_index"] = int(step_index)
+    if step_name:
+        attrs["claude_code.genai_hook.step_name"] = step_name
 
     if content.mode != "none":
         if content.mode == "full":
@@ -183,6 +189,9 @@ def tool_attributes(
     parent_segment: int,
     content: ContentProcessor,
     compat: Dict[str, Any],
+    step_index: Optional[int] = None,
+    step_name: Optional[str] = None,
+    plan_step: Optional[int] = None,
 ) -> Dict[str, Any]:
     attrs: Dict[str, Any] = {
         "gen_ai.operation.name": "execute_tool",
@@ -195,6 +204,12 @@ def tool_attributes(
     }
     if prompt_id:
         attrs["claude_code.genai_hook.turn.prompt_id"] = prompt_id
+    if step_index is not None:
+        attrs["claude_code.genai_hook.step_index"] = int(step_index)
+    if step_name:
+        attrs["claude_code.genai_hook.step_name"] = step_name
+    if plan_step is not None:
+        attrs["claude_code.genai_hook.plan_step"] = int(plan_step)
 
     if content.mode != "none":
         args_text, args_cut = content.clean(as_text(tool_input), content.max_tool)
@@ -236,6 +251,7 @@ def root_attributes(
     content: ContentProcessor,
     compat: Dict[str, Any],
     agent_id: Optional[str] = None,
+    step_count: Optional[int] = None,
 ) -> Dict[str, Any]:
     total_input = 0
     total_output = 0
@@ -276,6 +292,8 @@ def root_attributes(
         attrs["gen_ai.usage.cache_creation.input_tokens"] = total_creation
     if agent_id:
         attrs["gen_ai.agent.id"] = agent_id
+    if step_count is not None:
+        attrs["claude_code.genai_hook.step_count"] = int(step_count)
 
     if content.mode != "none":
         input_msgs = [message_payload(prompt_item, content.include_thinking)] if prompt_item else []

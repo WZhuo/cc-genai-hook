@@ -12,6 +12,7 @@ def _args(tmp_path):
         header=["x-api-key=test"],
         user="tester",
         content_mode="last_turn",
+        tool_mode="ordered",
         dry_run=False,
         config=str(tmp_path / "genai-hook.json"),
         settings=str(tmp_path / "settings.json"),
@@ -50,9 +51,8 @@ def test_install_is_idempotent_and_preserves_other_hooks(tmp_path):
     hooks = _hooks(settings)
     assert len(hooks["Stop"]) == 2
     assert len(hooks["SessionEnd"]) == 1
-    assert len(hooks["PostToolUse"]) == 1
-    assert len(hooks["PostToolUseFailure"]) == 1
-    assert hooks["PostToolUse"][0]["matcher"] == "*"
+    assert "PostToolUse" not in hooks
+    assert "PostToolUseFailure" not in hooks
     assert hooks["Notification"][0]["hooks"][0]["command"] == "echo notify"
     assert any(
         "cc_genai_hook hook stop" in handler["command"]
@@ -64,8 +64,8 @@ def test_install_is_idempotent_and_preserves_other_hooks(tmp_path):
     hooks = _hooks(settings)
     assert len(hooks["Stop"]) == 2
     assert len(hooks["SessionEnd"]) == 1
-    assert len(hooks["PostToolUse"]) == 1
-    assert len(hooks["PostToolUseFailure"]) == 1
+    assert "PostToolUse" not in hooks
+    assert "PostToolUseFailure" not in hooks
 
     config = json.loads((tmp_path / "genai-hook.json").read_text())
     assert config["exporter"]["endpoint"] == "http://127.0.0.1:4318"
@@ -99,6 +99,20 @@ def test_uninstall_removes_only_our_hooks(tmp_path):
     assert "SessionEnd" not in hooks
     assert "PostToolUse" not in hooks
     assert "PostToolUseFailure" not in hooks
+
+
+def test_realtime_install_registers_tool_hooks(tmp_path):
+    args = _args(tmp_path)
+    args.tool_mode = "realtime"
+    assert install(args) == 0
+    hooks = _hooks(tmp_path / "settings.json")
+    assert len(hooks["PostToolUse"]) == 1
+    assert len(hooks["PostToolUseFailure"]) == 1
+    assert hooks["PostToolUse"][0]["matcher"] == "*"
+    assert install(args) == 0
+    hooks = _hooks(tmp_path / "settings.json")
+    assert len(hooks["PostToolUse"]) == 1
+    assert len(hooks["PostToolUseFailure"]) == 1
 
 
 def test_sidecar_mode_is_not_available_in_m1(tmp_path):

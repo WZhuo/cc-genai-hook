@@ -46,7 +46,8 @@
     "sample_rate": 1.0,
     "dry_run": false,
     "debug": false,
-    "agent_name": "claude-code"
+    "agent_name": "claude-code",
+    "tool_mode": "ordered"
   },
   "state": {
     "dir": "~/.claude/state/genai-hook",

@@ -217,6 +217,14 @@ class StateStore:
                 [(session_id, message_id, prompt_id, now) for message_id, prompt_id in message_ids],
             )
 
+    def emitted_tool_ids(self, session_id: str) -> Set[str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tool_use_id FROM tools WHERE session_id=?",
+                (session_id,),
+            ).fetchall()
+        return {str(row[0]) for row in rows}
+
     def tool_emitted(self, session_id: str, tool_use_id: str) -> bool:
         with self._lock:
             row = self._conn.execute(
@@ -246,6 +254,31 @@ class StateStore:
                     int(span_id).to_bytes(8, "big"),
                     _now(),
                 ),
+            )
+
+    def mark_tools(
+        self,
+        session_id: str,
+        records: Iterable[Tuple[str, str, int]],
+    ) -> None:
+        now = _now()
+        with self._lock, self._conn:
+            self._conn.executemany(
+                """
+                INSERT INTO tools(session_id, tool_use_id, prompt_id, span_id, emitted_at)
+                VALUES(?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, tool_use_id) DO NOTHING
+                """,
+                [
+                    (
+                        session_id,
+                        tool_use_id,
+                        prompt_id,
+                        int(span).to_bytes(8, "big"),
+                        now,
+                    )
+                    for tool_use_id, prompt_id, span in records
+                ],
             )
 
     def tool_count(self) -> int:

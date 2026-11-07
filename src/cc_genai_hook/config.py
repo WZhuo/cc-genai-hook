@@ -60,6 +60,7 @@ DEFAULTS: Dict[str, Any] = {
         "dry_run": False,
         "debug": False,
         "agent_name": "claude-code",
+        "tool_mode": "ordered",
     },
     "state": {
         "dir": "~/.claude/state/genai-hook",
@@ -225,6 +226,15 @@ def load_config(path: Optional[str] = None, require_endpoint: bool = False) -> D
     content_mode = os.environ.get("CC_GENAI_HOOK_CONTENT_MODE")
     if content_mode:
         cfg.setdefault("content", {})["mode"] = content_mode.strip().lower()
+    tool_mode = os.environ.get("CC_GENAI_HOOK_TOOL_MODE")
+    if tool_mode:
+        cfg.setdefault("hook", {})["tool_mode"] = tool_mode.strip().lower()
+
+    cfg.setdefault("hook", {})
+    tool_mode = str(cfg["hook"].get("tool_mode") or "ordered").lower()
+    if tool_mode not in ("ordered", "realtime"):
+        raise ConfigError("hook.tool_mode must be ordered or realtime")
+    cfg["hook"]["tool_mode"] = tool_mode
 
     protocol = os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL")
     if protocol:

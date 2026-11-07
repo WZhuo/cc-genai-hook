@@ -143,6 +143,7 @@ def _build_config(existing: Dict[str, Any], args: argparse.Namespace) -> Dict[st
     cfg.setdefault("content", {}).setdefault("mode", "last_turn")
     cfg.setdefault("content", {}).setdefault("include_thinking", False)
     cfg.setdefault("hook", {}).setdefault("agent_name", "claude-code")
+    cfg["hook"]["tool_mode"] = getattr(args, "tool_mode", "ordered") or "ordered"
     cfg["enabled"] = True
     return cfg
 
@@ -173,12 +174,21 @@ def install(args: argparse.Namespace) -> int:
     hooks["SessionEnd"] = _strip_ours(list(hooks.get("SessionEnd") or [])) + [
         _entry("session_end", 30)
     ]
-    hooks["PostToolUse"] = _strip_ours(list(hooks.get("PostToolUse") or [])) + [
-        _entry("post_tool_use", 30, "*")
-    ]
-    hooks["PostToolUseFailure"] = _strip_ours(
-        list(hooks.get("PostToolUseFailure") or [])
-    ) + [_entry("post_tool_use_failure", 30, "*")]
+    tool_mode = getattr(args, "tool_mode", "ordered") or "ordered"
+    if tool_mode == "realtime":
+        hooks["PostToolUse"] = _strip_ours(
+            list(hooks.get("PostToolUse") or [])
+        ) + [_entry("post_tool_use", 30, "*")]
+        hooks["PostToolUseFailure"] = _strip_ours(
+            list(hooks.get("PostToolUseFailure") or [])
+        ) + [_entry("post_tool_use_failure", 30, "*")]
+    else:
+        for event in ("PostToolUse", "PostToolUseFailure"):
+            kept = _strip_ours(list(hooks.get(event) or []))
+            if kept:
+                hooks[event] = kept
+            else:
+                hooks.pop(event, None)
     settings["hooks"] = hooks
 
     if getattr(args, "dry_run", False):
@@ -197,9 +207,10 @@ def install(args: argparse.Namespace) -> int:
         print("[ok] config backup: %s" % config_backup)
     if backup:
         print("[ok] settings backup: %s" % backup)
-    print(
-        "[ok] hooks installed: Stop, SessionEnd, PostToolUse, PostToolUseFailure"
-    )
+    installed = "Stop, SessionEnd"
+    if tool_mode == "realtime":
+        installed += ", PostToolUse, PostToolUseFailure"
+    print("[ok] hooks installed: %s (tool_mode=%s)" % (installed, tool_mode))
     print("[next] run: cc-genai-hook doctor --send-test")
     return 0
 
