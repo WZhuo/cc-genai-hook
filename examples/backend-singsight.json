@@ -1,0 +1,10 @@
+{
+  "exporter": {
+    "protocol": "http/protobuf",
+    "endpoint": "https://dev-otel.clickzetta.com",
+    "endpoint_kind": "base",
+    "headers": {
+      "x-singsight-apikey": "${SINGSIGHT_API_KEY}"
+    }
+  }
+}

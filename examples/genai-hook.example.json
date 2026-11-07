@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "enabled": true,
+  "exporter": {
+    "protocol": "http/protobuf",
+    "endpoint": "https://otel.example.com",
+    "endpoint_kind": "base",
+    "headers": {
+      "x-api-key": "${OTEL_API_KEY}",
+      "Authorization": "Bearer ${OTEL_TOKEN}"
+    },
+    "compression": "gzip",
+    "timeout_ms": 30000,
+    "batch": {
+      "max_size": 512,
+      "schedule_delay_ms": 500
+    }
+  },
+  "resource": {
+    "service.name": "claude-code",
+    "attributes": {
+      "enduser.id": "${USER}"
+    }
+  },
+  "content": {
+    "mode": "last_turn",
+    "include_thinking": false,
+    "max_input_chars": 200000,
+    "max_message_chars": 100000,
+    "max_tool_chars": 100000,
+    "redact_patterns": []
+  },
+  "compat": {
+    "messages_format": "json",
+    "cache_write_attribute": "cache_creation",
+    "emit_provider_name": true,
+    "emit_system_legacy": true
+  },
+  "emit": {
+    "invoke_agent": true,
+    "chat": true,
+    "execute_tool": true,
+    "subagents": true
+  },
+  "hook": {
+    "sample_rate": 1.0,
+    "dry_run": false,
+    "debug": false,
+    "agent_name": "claude-code"
+  },
+  "state": {
+    "dir": "~/.claude/state/genai-hook",
+    "ttl_days": 14
+  }
+}
