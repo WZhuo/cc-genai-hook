@@ -1067,12 +1067,12 @@ invoke_agent (parent turn / segment)
 | 阶段 | 内容 |
 | --- | --- |
 | M1 | **Command 基线模式**：确定性 ID + state + transcript parser + Stop 批量发 chat/root |
-| M2 | **Sidecar 实时模式**：hookd + HTTP hooks，PostToolUse/Failure 实时发 execute_tool |
-| M3 | SubagentStart/Stop、agent_transcript_path、Agent tool 映射（同一 trace） |
+| M2 | **Command 丰富内容模式**：PostToolUse/Failure command hooks、execute_tool spans、工具入参/返回/错误/耗时；不引入 sidecar |
+| M3 | **Sidecar 实时模式 + 子代理**：hookd + HTTP hooks、open segment span、实时 PostToolUse；SubagentStart/Stop、agent_transcript_path、Agent tool 映射（同一 trace） |
 | M4 | outbox 重试、脱敏、采样、doctor、测试 |
 | M5 | 灰度上线、后端看板、文档 |
 
-两种模式共用 core；M1 先交付可独立运行的 command 模式，M2 增加 sidecar，不改变配置和属性映射。
+交付顺序：M1 先交付可独立运行的 command 模式；M2 在 command 模式下补齐 `execute_tool` 和工具内容；M3 再引入 sidecar 提供跨事件 open span 和实时工具 span。两种模式共用 core、配置和属性映射。
 
 ### 15.2 灰度
 
@@ -1097,9 +1097,10 @@ M1 代码位于 `cc-genai-hook/`：
 
 M1 暂不包含（按里程碑）：
 
-- ⏳ sidecar/HTTP hooks、实时 `PostToolUse`、`execute_tool` spans（M2）
-- ⏳ 子代理同一 trace 映射（M3）
-- ⏳ durable outbox、采样、完整脱敏（M4）
+- ⏳ `PostToolUse` / `PostToolUseFailure`、`execute_tool` spans、工具入参/返回/错误/耗时（M2，仍为 command 模式）
+- ⏳ sidecar/HTTP hooks、实时 open span（M3）
+- ⏳ 子代理 `agent_transcript_path`、Agent tool 映射、同一 trace（M3）
+- ⏳ durable outbox、采样、完整脱敏、TTL 清理（M4）
 
 ### 15.4 从现有脚本迁移
 

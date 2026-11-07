@@ -22,12 +22,17 @@ Implemented in M1:
 - `install`, `uninstall`, `doctor`, `config`, `seed`, and `hook` CLI commands.
 - Dry-run exporter for local verification.
 
-Not implemented yet (planned for M2/M3):
+Not implemented yet (planned for M2/M3/M4):
 
-- Sidecar/HTTP hook mode and real-time `PostToolUse` spans.
-- `execute_tool` spans (M2).
-- Subagent same-trace linking via Agent tool mapping (M3).
-- Durable SQLite outbox (M4).
+- **M2 — richer content in command mode (no sidecar):**
+  - `PostToolUse` / `PostToolUseFailure` command hooks.
+  - `execute_tool` spans with tool name, call ID, arguments, result, error and duration.
+  - Deterministic tool span IDs and `tool_use_id` idempotency.
+  - `requestRef`, `gen_ai.response.model`, tool-call/tool-result blocks in messages.
+- **M3 — sidecar real-time mode + subagents:**
+  - Sidecar/HTTP hooks, open segment spans, real-time `PostToolUse`.
+  - Subagent `agent_transcript_path`, Agent tool mapping, same trace.
+- **M4:** durable SQLite outbox, sampling, full redaction, TTL cleanup.
 
 ## Install
 

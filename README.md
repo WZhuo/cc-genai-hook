@@ -7,7 +7,7 @@ OpenTelemetry GenAI semantic conventions 的 span，并导出到**任意 OTLP HT
 - 不依赖 Claude Code 原生 trace：使用独立配置文件，不需要开启原生 telemetry。
 - 确定性 trace/span ID：重复 hook 重放得到相同的 ID。
 - 内容默认脱敏、可截断、可关闭。
-- 支持 command 基线模式和 sidecar 实时模式（sidecar 在 M2 实现）。
+- 支持 command 基线模式和 sidecar 实时模式（sidecar 在 M3 实现）。
 
 ## 当前状态
 
@@ -24,8 +24,14 @@ OpenTelemetry GenAI semantic conventions 的 span，并导出到**任意 OTLP HT
 
 **M2 / M3 / M4（计划中）**
 
-- M2：sidecar/HTTP hooks、实时 `PostToolUse`、`execute_tool` spans
-- M3：子代理 `agent_transcript_path`、Agent tool 映射、同一 trace
+- M2：**丰富 trace 内容（command 模式，不引入 sidecar）**
+  - `PostToolUse` / `PostToolUseFailure` command hooks
+  - `execute_tool` spans：工具名、调用 ID、入参、返回、错误、耗时
+  - 确定性 tool span ID + `tool_use_id` 幂等
+  - 补齐 `requestRef`、`gen_ai.response.model`、工具调用/结果 block
+- M3：**sidecar 实时模式 + 子代理**
+  - sidecar/HTTP hooks、open segment span、实时 `PostToolUse`
+  - 子代理 `agent_transcript_path`、Agent tool 映射、同一 trace
 - M4：durable outbox、采样、完整脱敏、TTL 清理
 
 ## 工作原理
@@ -54,13 +60,15 @@ invoke_agent（segment root）
 └── chat（每条 assistant 消息）
 ```
 
-M2 会增加：
+M2 会在 command 模式下增加：
 
 ```text
 invoke_agent
 ├── chat
 └── execute_tool
 ```
+
+M3 再把 sidecar 加进来，提供跨事件 open span 和实时工具 span。
 
 ## 安装
 
@@ -257,7 +265,7 @@ cc-genai-hook seed --session-id ID --transcript PATH
 cc-genai-hook hook stop|session_end|subagent_stop|seed
 ```
 
-M1 只实现了 `--mode command`。`--mode sidecar` 会在 M2 提供。
+M1 只实现了 `--mode command`。`--mode sidecar` 会在 M3 提供。
 
 ### seed
 
@@ -353,8 +361,8 @@ PYTHONPATH=src python3 -m pytest -q
 | 阶段 | 内容 |
 | --- | --- |
 | M1 | command 模式、Stop/SessionEnd、chat/root spans、SQLite 幂等 |
-| M2 | sidecar、HTTP hooks、PostToolUse/Failure、execute_tool |
-| M3 | 子代理 agent_transcript_path、Agent tool 映射、同一 trace |
+| M2 | command 模式丰富内容：PostToolUse/Failure、execute_tool、工具入参/返回/错误/耗时 |
+| M3 | sidecar/HTTP hooks、实时 open span、子代理 agent_transcript_path、Agent tool 映射、同一 trace |
 | M4 | durable outbox、采样、完整脱敏、TTL 清理 |
 
 详细设计见 [`docs/design.md`](docs/design.md)。
