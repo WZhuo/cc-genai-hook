@@ -34,12 +34,22 @@ Implemented in M2 (command mode, no sidecar):
 - `error.type`, `is_interrupt`, and tool failure status.
 - Chat and tool spans are siblings under the turn root.
 
-Not implemented yet (planned for M3/M4):
+Implemented in M3:
 
-- **M3 — sidecar real-time mode + subagents:**
+- Parent `Stop` parses subagent transcripts; `SubagentStop` is ignored.
+- Detect Agent/Task delegation via `toolUseResult.agentId`.
+- Create a `subagent` container under the delegation tool span.
+- Subagent steps use a local step counter from `#1`.
+- Extend the parent tool span end to contain the subagent interval.
+- Recursive subagents up to depth 5, all in the same trace.
+- Subagent subtrees are built in **ordered** mode only; realtime mode emits the
+  delegation tool span without expanding the subagent transcript.
+
+Not implemented yet (planned for M4/M5):
+
+- **M4 — sidecar real-time mode:**
   - Sidecar/HTTP hooks, open segment spans, real-time `PostToolUse`.
-  - Subagent `agent_transcript_path`, Agent tool mapping, same trace.
-- **M4:** durable SQLite outbox, sampling, full redaction, TTL cleanup.
+- **M5:** durable SQLite outbox, sampling, full redaction, TTL cleanup.
 
 ## Install
 

@@ -274,6 +274,8 @@ def handle_stop(
                         agent_name=agent_name,
                         agent_id=agent_id,
                         emitted_tool_ids=already_tools,
+                        emitted_message_ids=already,
+                        transcript_path=transcript,
                     )
                     records.extend(chat_records)
                     tool_records.extend(new_tool_records)
@@ -349,6 +351,11 @@ def run(event: str) -> int:
         if event == "seed":
             handle_seed(payload, config)
             return 0
+        if event == "subagent_stop":
+            # Subagent transcripts are emitted as subtrees by the parent
+            # turn's Stop hook, never as standalone traces.
+            _log(config, "subagent stop ignored (handled by parent turn)")
+            return 0
         if event in ("post_tool_use", "post_tool_use_failure"):
             result = handle_tool(payload, event, config)
             _log(
@@ -364,7 +371,7 @@ def run(event: str) -> int:
                 error=bool(result.error),
             )
             return 0
-        if event in ("stop", "session_end", "subagent_stop"):
+        if event in ("stop", "session_end"):
             result = handle_stop(payload, event, config)
             _log(
                 config,

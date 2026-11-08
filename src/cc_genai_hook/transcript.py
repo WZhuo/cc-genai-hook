@@ -43,6 +43,8 @@ class ToolResult:
     content: Any
     is_error: bool
     ts: Optional[str]
+    agent_id: Optional[str] = None
+    agent_type: Optional[str] = None
 
 
 def blocks_of(msg: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -122,6 +124,12 @@ def build_timeline(
             row_prompt_id = row.get("promptId")
             if is_real_prompt_row(row) and row_prompt_id:
                 current_prompt_id = row_prompt_id
+            tool_use_result = row.get("toolUseResult")
+            agent_id = None
+            agent_type = None
+            if isinstance(tool_use_result, dict):
+                agent_id = tool_use_result.get("agentId")
+                agent_type = tool_use_result.get("agentType")
             for block in content:
                 if block.get("type") == "tool_result":
                     tool_use_id = block.get("tool_use_id")
@@ -130,6 +138,8 @@ def build_timeline(
                             content=block.get("content"),
                             is_error=bool(block.get("is_error")),
                             ts=row.get("timestamp"),
+                            agent_id=str(agent_id) if agent_id else None,
+                            agent_type=str(agent_type) if agent_type else None,
                         )
             timeline.append(
                 TimelineItem(

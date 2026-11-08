@@ -941,22 +941,36 @@ SubagentStop
   → 生成子代理 invoke_agent / chat
 ```
 
-### 11.2 Trace 策略
+### 11.2 Trace 策略（M3 已实现）
 
-**已确认决策：子代理与父 turn 在同一个 trace。**
+**已确认决策：子代理与父 turn 在同一个 trace，由父 Stop 统一构建。**
 
 ```text
 invoke_agent (parent turn / segment)
 └── execute_tool (Agent tool)
-    └── invoke_agent (subagent)
-        └── chat
+    └── subagent (container)
+        ├── chat
+        ├── execute_tool
+        └── subagent response
 ```
 
-父节点选择顺序：
+实现规则：
 
-1. **映射存在**：parent = Agent 的 `execute_tool` span（由 `agent_id -> Agent tool_use_id` 映射得到）。
-2. **映射缺失**：parent = 父 turn 当前的 segment root，仍然使用父 trace_id；同时如果能在 transcript 中找到 Agent tool_use_id，加一个 span link。
-3. **完全找不到父上下文**（极少数跨 session/后台场景）：才退化为独立 trace，并记录 warning；这是异常回退，不是默认策略。
+1. 父会话 `Stop` 解析父 transcript；`SubagentStop` 被忽略，不单独发 trace。
+2. 通过 tool result 的 `toolUseResult.agentId` 识别 Agent/Task delegation。
+3. 查找 `subagents/agent-<agentId>.jsonl`，读取 `.meta.json` 的 `agentType` / `description`。
+4. 在 delegation `execute_tool` span 下创建 `subagent` 容器：
+   - parent = Agent tool span；
+   - `gen_ai.operation.name=invoke_agent`；
+   - `gen_ai.agent.id` / `gen_ai.agent.name`；
+   - `claude_code.genai_hook.subagent=true`；
+   - `claude_code.genai_hook.parent.tool_use_id`。
+5. 子代理内部使用独立 step counter，从 `#1` 重新编号。
+6. 父 tool span 的 end 扩展到 subagent end，保证父区间包含子区间。
+7. 递归子代理，深度上限 5；所有 span 复用父 turn 的 trace_id。
+
+**模式限制**：子代理子树只在 `hook.tool_mode=ordered` 下构建；`realtime` 模式
+的 PostToolUse 路径只发 delegation tool span，不展开子代理 transcript。
 
 补充属性：
 
@@ -1096,11 +1110,12 @@ invoke_agent (parent turn / segment)
 | --- | --- |
 | M1 ✅ | **Command 基线模式**：确定性 ID + state + transcript parser + Stop 批量发 chat/root |
 | M2 ✅ | **Command 丰富内容模式**：PostToolUse/Failure command hooks、execute_tool spans、工具入参/返回/错误/耗时；不引入 sidecar |
-| M3 ⏳ | **Sidecar 实时模式 + 子代理**：hookd + HTTP hooks、open segment span、实时 PostToolUse；SubagentStart/Stop、agent_transcript_path、Agent tool 映射（同一 trace） |
-| M4 ⏳ | outbox 重试、脱敏、采样、doctor、测试 |
-| M5 ⏳ | 灰度上线、后端看板、文档 |
+| M3 ✅ | **子代理 trace（无 sidecar）**：父 Stop 解析 subagent transcript、delegation tool span 下创建 subagent 容器、本地 step 顺序、同一 trace、递归深度限制 |
+| M4 ⏳ | **Sidecar 实时模式**：hookd + HTTP hooks、open segment span、实时 PostToolUse |
+| M5 ⏳ | outbox 重试、脱敏、采样、doctor、测试 |
+| M6 ⏳ | 灰度上线、后端看板、文档 |
 
-交付顺序：M1 先交付可独立运行的 command 模式；M2 在 command 模式下补齐 `execute_tool` 和工具内容；M3 再引入 sidecar 提供跨事件 open span 和实时工具 span。两种模式共用 core、配置和属性映射。
+交付顺序：M1 先交付可独立运行的 command 模式；M2 在 command 模式下补齐 `execute_tool` 和工具内容；M3 由父 Stop 统一构建子代理子树，仍然不引入 sidecar；M4 再引入 sidecar 提供跨事件 open span 和实时工具 span。两种模式共用 core、配置和属性映射。
 
 ### 15.2 灰度
 
@@ -1110,7 +1125,7 @@ invoke_agent (parent turn / segment)
 4. **默认**：加 kill switch `CC_GENAI_HOOK_ENABLED=0`。
 5. **监控**：events received、spans emitted、export failures、queue depth、duplicate drops。
 
-### 15.3 M1/M2 实现状态（2026-11-07）
+### 15.3 M1/M2/M3 实现状态（2026-11-08）
 
 代码位于 `cc-genai-hook/`。
 
@@ -1134,14 +1149,24 @@ M2 已完成：
 - ✅ `execute_tool` spans：工具名、call ID、入参、返回、错误、耗时
 - ✅ 确定性 tool span ID + `tool_use_id` 幂等
 - ✅ `error.type` / `is_interrupt` / `tool.success`
-- ✅ tool span 挂到当前 turn 的 root；多 segment turn 的精确挂载留给 M3 sidecar
-- ✅ 33 个单元/集成测试通过
+- ✅ tool span 挂到当前 turn 的 root
+- ✅ 34 个单元/集成测试通过
 
-M3/M4 暂不包含：
+M3 已完成（无 sidecar）：
 
-- ⏳ sidecar/HTTP hooks、实时 open span（M3）
-- ⏳ 子代理 `agent_transcript_path`、Agent tool 映射、同一 trace（M3）
-- ⏳ durable outbox、采样、完整脱敏、TTL 清理（M4）
+- ✅ 父 Stop 统一解析 subagent transcript，`SubagentStop` 被忽略
+- ✅ 通过 `toolUseResult.agentId` 识别 Agent/Task delegation
+- ✅ 查找 `subagents/agent-<agentId>.jsonl`，读取 `.meta.json`
+- ✅ delegation tool span 下创建 `subagent` 容器
+- ✅ 子代理内部使用独立 step counter，从 `#1` 重新编号
+- ✅ 父 tool span 的 end 扩展到 subagent end，保证区间包含
+- ✅ 递归子代理，深度上限 5
+- ✅ 所有 span 复用父 turn 的 trace_id
+
+M4/M5 暂不包含：
+
+- ⏳ sidecar/HTTP hooks、实时 open span、实时 PostToolUse（M4）
+- ⏳ durable outbox、采样、完整脱敏、TTL 清理（M5）
 
 ### 15.4 从现有脚本迁移
 

@@ -189,6 +189,14 @@ def install(args: argparse.Namespace) -> int:
                 hooks[event] = kept
             else:
                 hooks.pop(event, None)
+
+    # M3 handles subagents from the parent Stop; stale standalone
+    # SubagentStop entries from older installs are removed.
+    kept = _strip_ours(list(hooks.get("SubagentStop") or []))
+    if kept:
+        hooks["SubagentStop"] = kept
+    else:
+        hooks.pop("SubagentStop", None)
     settings["hooks"] = hooks
 
     if getattr(args, "dry_run", False):

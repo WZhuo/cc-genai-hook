@@ -34,12 +34,23 @@ OpenTelemetry GenAI semantic conventions 的 span，并导出到**任意 OTLP HT
 - `error.type`、`is_interrupt`、工具失败状态
 - 工具 span 与 chat 一样挂在 turn root 下
 
-**M3 / M4（计划中）**
+**M3（已完成）**
 
-- M3：**sidecar 实时模式 + 子代理**
+- 父会话 `Stop` hook 统一解析 subagent transcript，不单独发 subagent trace
+- 通过 `toolUseResult.agentId` 识别 Agent/Task delegation
+- 查找 `subagents/agent-<agentId>.jsonl`
+- delegation tool span 下创建 `subagent` 容器
+- 子代理内部步骤从 `#1` 重新编号，挂在容器下
+- 父 tool span 的 end 扩展到 subagent end，保证区间包含
+- 递归深度上限 5
+- `SubagentStop` 被忽略，避免重复 trace
+- 子代理子树只在 **ordered** 模式构建；realtime 模式只发 delegation tool span，不展开子代理
+
+**M4 / M5（计划中）**
+
+- M4：**sidecar 实时模式**
   - sidecar/HTTP hooks、open segment span、实时 `PostToolUse`
-  - 子代理 `agent_transcript_path`、Agent tool 映射、同一 trace
-- M4：durable outbox、采样、完整脱敏、TTL 清理
+- M5：durable outbox、采样、完整脱敏、TTL 清理
 
 ## 工作原理
 
@@ -70,9 +81,14 @@ Claude Code
 trace 拓扑：
 
 ```text
-invoke_agent（segment root）
+invoke_agent（turn root）
 ├── chat（每条 assistant 消息）
-└── execute_tool（每次工具调用）
+├── execute_tool（每次工具调用）
+└── execute_tool（Agent/Task delegation）
+    └── subagent（容器）
+        ├── chat
+        ├── execute_tool
+        └── subagent response
 ```
 
 M2 默认使用 **ordered 模式**：Stop 时按 transcript 顺序统一生成 chat 和
@@ -80,7 +96,9 @@ execute_tool，共享一个 step counter，并用 `+1ms` 合成时间戳保证�
 也可以切换到 **realtime 模式**：用 PostToolUse/Failure command hooks 实时
 发送 tool span，工具 span 使用确定性 ID 并挂到 turn root。
 
-M3 的 sidecar 会提供跨事件 open span，从而支持多 segment turn 的精确实时挂载。
+M3 由父会话 Stop hook 解析 subagent transcript，把 `subagent` 容器挂在
+delegation tool span 下，子代理内部使用自己的 step counter。M4 的 sidecar
+会提供跨事件 open span，从而支持多 segment turn 的精确实时挂载。
 
 ## 安装
 
@@ -282,6 +300,9 @@ cc-genai-hook hook stop|session_end|subagent_stop|post_tool_use|post_tool_use_fa
 默认 `--tool-mode ordered`：Stop 时统一生成 chat/tool，保证顺序。  
 `--tool-mode realtime` 会额外注册 `PostToolUse` / `PostToolUseFailure`，工具 span 实时发送。
 
+`subagent_stop` 事件保留用于兼容，但会被忽略：子代理 trace 由父会话 `Stop`
+统一解析 `subagents/agent-<id>.jsonl` 生成。
+
 M1 只实现了 `--mode command`。`--mode sidecar` 会在 M3 提供。
 
 ### seed
@@ -339,6 +360,18 @@ cc-genai-hook seed --session-id <session-id> --transcript <transcript-path>
 
 工具内容同样受 `content.mode`、`max_tool_chars`、`redact_patterns` 控制；
 截断时写 `claude_code.genai_hook.tool.*.truncated=true`。
+
+### `subagent`
+
+- span name：`subagent`
+- `gen_ai.operation.name=invoke_agent`
+- `gen_ai.agent.id` / `gen_ai.agent.name`
+- `gen_ai.conversation.id`
+- `claude_code.genai_hook.subagent=true`
+- `claude_code.genai_hook.parent.tool_use_id`
+- `claude_code.genai_hook.step_count`
+- parent = delegation tool span
+- 子步骤的 parent = subagent container，本地 step counter 从 `#1` 开始
 
 ### 顺序属性
 
@@ -403,7 +436,7 @@ cc-genai-hook/
 PYTHONPATH=src python3 -m pytest -q
 ```
 
-当前测试：33 passed。
+当前测试：34 passed。
 
 ## Roadmap
 
@@ -411,8 +444,10 @@ PYTHONPATH=src python3 -m pytest -q
 | --- | --- |
 | M1 | ✅ command 模式、Stop/SessionEnd、chat/root spans、SQLite 幂等 |
 | M2 | ✅ command 模式丰富内容：ordered step 顺序、PostToolUse/Failure（realtime）、execute_tool、工具入参/返回/错误/耗时 |
-| M3 | ⏳ sidecar/HTTP hooks、实时 open span、子代理 agent_transcript_path、Agent tool 映射、同一 trace |
-| M4 | ⏳ durable outbox、采样、完整脱敏、TTL 清理 |
+| M3 | ✅ 子代理 trace：父 Stop 解析 subagent transcript、subagent 容器、本地 step 顺序、同一 trace |
+| M4 | ⏳ sidecar/HTTP hooks、实时 open span、实时 PostToolUse |
+| M5 | ⏳ durable outbox、采样、完整脱敏、TTL 清理 |
+| M6 | ⏳ 灰度上线、后端看板、文档 |
 
 详细设计见 [`docs/design.md`](docs/design.md)。
 
