@@ -7,7 +7,7 @@ OpenTelemetry GenAI semantic conventions 的 span，并导出到**任意 OTLP HT
 - 不依赖 Claude Code 原生 trace：使用独立配置文件，不需要开启原生 telemetry。
 - 确定性 trace/span ID：重复 hook 重放得到相同的 ID。
 - 内容默认脱敏、可截断、可关闭。
-- 支持 command 基线模式和 sidecar 实时模式（sidecar 在 M3 实现）。
+- 支持 command 基线模式和 sidecar 实时模式（sidecar 在 M4 实现）。
 
 ## 当前状态
 
@@ -303,7 +303,7 @@ cc-genai-hook hook stop|session_end|subagent_stop|post_tool_use|post_tool_use_fa
 `subagent_stop` 事件保留用于兼容，但会被忽略：子代理 trace 由父会话 `Stop`
 统一解析 `subagents/agent-<id>.jsonl` 生成。
 
-M1 只实现了 `--mode command`。`--mode sidecar` 会在 M3 提供。
+当前只实现了 `--mode command`。`--mode sidecar` 会在 M4 提供。
 
 ### seed
 

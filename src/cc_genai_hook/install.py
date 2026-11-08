@@ -154,7 +154,7 @@ def install(args: argparse.Namespace) -> int:
         mode = "command"
     if mode != "command":
         print(
-            "error: M1 only supports --mode command; sidecar mode is planned for M3",
+            "error: only --mode command is implemented; sidecar mode is planned for M4",
             file=sys.stderr,
         )
         return 2

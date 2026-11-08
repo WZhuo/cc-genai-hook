@@ -504,7 +504,7 @@ trace_id = hash(session_id + prompt_id)
 
 `invoke_agent → chat → execute_tool` 不作为 v1 的目标；如果后续有明确需求，可以作为可选扩展（批量模式或 transcript 查找），不改变默认拓扑。
 
-**M2 command 模式限制**：`PostToolUse` 在 Stop 之前触发，无法可靠知道当前 segment seq，因此 M2 的 tool span 固定挂到 segment 0 root。M3 sidecar 会维护 open segment，把 tool span 挂到当前 segment。
+**M2 command 模式限制**：`PostToolUse` 在 Stop 之前触发，无法可靠知道当前 segment seq，因此 M2 的 tool span 固定挂到 segment 0 root。M4 sidecar 会维护 open segment，把 tool span 挂到当前 segment。
 
 ### 7.2 Segment 策略
 
