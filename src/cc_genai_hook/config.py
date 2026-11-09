@@ -1,9 +1,8 @@
 """Configuration loading and endpoint/header resolution.
 
 The hook is backend-agnostic: it only understands an OTLP endpoint and a set
-of arbitrary headers.  Backend-specific values (for example SignSight's
-``x-singsight-apikey``) belong in the config file or environment, never in the
-code.
+of arbitrary headers.  Backend-specific values (for example ``x-api-key`` or
+``Authorization``) belong in the config file or environment, never in the code.
 """
 
 from __future__ import annotations

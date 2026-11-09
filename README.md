@@ -122,15 +122,16 @@ cc-genai-hook install \
   --user "$(whoami)"
 ```
 
-### SignSight 示例
+### 自定义 header
 
-代码不依赖 SignSight；下面只是配置示例：
+后端需要自定义认证时，`--header` 可以重复：
 
 ```bash
 cc-genai-hook install \
   --mode command \
-  --endpoint https://dev-otel.clickzetta.com \
-  --header x-singsight-apikey="$SINGSIGHT_API_KEY" \
+  --endpoint https://otel.example.com \
+  --header x-api-key="$OTEL_API_KEY" \
+  --header x-tenant-id="$OTEL_TENANT_ID" \
   --user "$(whoami)"
 ```
 
@@ -424,11 +425,20 @@ cc-genai-hook/
 ├── examples/
 │   ├── genai-hook.example.json
 │   ├── settings.command.json
-│   ├── backend-singsight.json
 │   └── local_otlp_receiver.py
 ├── src/cc_genai_hook/
 └── tests/
 ```
+
+## Agent Skill
+
+安装和诊断步骤也提供为 Agent Skill：
+
+```text
+skills/cc-genai-hook-install/SKILL.md
+```
+
+它只描述通用的 cc-genai-hook 安装、配置和诊断，不绑定任何具体后端。
 
 ## 开发
 

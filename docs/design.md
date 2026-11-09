@@ -3,7 +3,7 @@
 - **状态**：M1 实现中，全部关键决策已确认（2026-11-04）
 - **日期**：2026-11-04
 - **范围**：通过 Claude Code hooks 生成符合 gen_ai 语义的 trace，并导出到任意 OTLP HTTP/protobuf 后端
-- **相关文件**：`singsight_genai.py`、`singsight_install.sh`（现有实现，作为迁移起点）
+- **相关文件**：`cc-genai-hook/`（实现代码、安装器、测试和示例）
 - **目标读者**：Claude Code hook 维护者、可观测性平台接入方、SRE
 
 ---
@@ -298,14 +298,15 @@ key1=value1,key2=value2
 }
 ```
 
-**SignSight（仅作为示例，代码无耦合）：**
+**自定义 header（任意后端）：**
 
 ```json
 {
   "exporter": {
-    "endpoint": "https://dev-otel.clickzetta.com",
+    "endpoint": "https://otel.example.com",
     "headers": {
-      "x-singsight-apikey": "${SINGSIGHT_API_KEY}"
+      "x-api-key": "${OTEL_API_KEY}",
+      "x-tenant-id": "${OTEL_TENANT_ID}"
     }
   }
 }
@@ -1041,7 +1042,7 @@ invoke_agent (parent turn / segment)
 
 | 后端 | endpoint 形态 | header 示例 |
 | --- | --- | --- |
-| SignSight | base | `x-singsight-apikey` |
+| 通用 OTLP | base 或 full | `x-api-key` / `Authorization` |
 | SigNoz | base 或 full | `signoz-access-token` |
 | Jaeger | base | 无 |
 | Tempo | base | 无 / `Authorization` |
@@ -1170,13 +1171,13 @@ M4/M5 暂不包含：
 
 ### 15.4 从现有脚本迁移
 
-| 现有 | 通用化后 |
+| 旧实现 | 通用化后 |
 | --- | --- |
-| `singsight_genai.py` | `cc_genai_hook.py` / `cc_genai_hookd` |
-| `singsight_install.sh` | `cc_genai_install.sh` |
-| `SINGSIGHT_*` | `CC_GENAI_*` |
-| `singsight.*` 属性 | `claude_code.genai_hook.*` |
-| `x-singsight-apikey` | `exporter.headers` |
+| `legacy_genai.py` | `cc_genai_hook.py` / `cc_genai_hookd` |
+| `legacy_install.sh` | `cc_genai_install.sh` |
+| `LEGACY_*` | `CC_GENAI_*` |
+| `legacy.*` 属性 | `claude_code.genai_hook.*` |
+| `x-api-key` | `exporter.headers` |
 | 写 `settings.json` 的 `env` | 写 `~/.claude/genai-hook.json` |
 | 硬编码 endpoint | CLI/配置参数 |
 
