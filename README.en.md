@@ -170,3 +170,7 @@ PYTHONPATH=src python3 -m pytest -q
   `content.mode=none` or redaction patterns if that is not acceptable.
 - The hook never writes to stdout; it exits 0 even on failure so it cannot block
   Claude Code. Check `~/.claude/state/genai-hook/hook.err.log` for failures.
+
+## License
+
+[MIT](LICENSE)

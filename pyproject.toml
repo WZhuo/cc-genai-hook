@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Generic Claude Code GenAI hook: export gen_ai spans to any OTLP HTTP/protobuf backend"
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
 dependencies = [
   "opentelemetry-api>=1.20",
   "opentelemetry-sdk>=1.20",

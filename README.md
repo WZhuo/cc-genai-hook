@@ -467,4 +467,4 @@ PYTHONPATH=src python3 -m pytest -q
 
 ## License
 
-未指定。使用前请与仓库所有者确认。
+[MIT](LICENSE)
