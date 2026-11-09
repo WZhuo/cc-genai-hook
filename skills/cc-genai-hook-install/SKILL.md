@@ -132,11 +132,19 @@ CCG="$(command -v cc-genai-hook)"
 如果没有，安装到稳定目录。**不要**把 venv 放到临时目录，因为 hook 命令会引用它。
 
 ```bash
-git clone https://github.com/WZhuo/cc-genai-hook.git "$HOME/Code/cc-genai-hook"
-python3 -m venv "$HOME/.local/share/cc-genai-hook/venv"
-"$HOME/.local/share/cc-genai-hook/venv/bin/pip" install -U pip setuptools wheel
-"$HOME/.local/share/cc-genai-hook/venv/bin/pip" install "$HOME/Code/cc-genai-hook"
-CCG="$HOME/.local/share/cc-genai-hook/venv/bin/cc-genai-hook"
+CCGH_HOME="$HOME/.local/share/cc-genai-hook"
+mkdir -p "$CCGH_HOME"
+
+if [ -d "$CCGH_HOME/src/.git" ]; then
+  git -C "$CCGH_HOME/src" pull --ff-only
+else
+  git clone https://github.com/clickzetta/cc-genai-hook.git "$CCGH_HOME/src"
+fi
+
+python3 -m venv "$CCGH_HOME/venv"
+"$CCGH_HOME/venv/bin/pip" install -U pip setuptools wheel
+"$CCGH_HOME/venv/bin/pip" install "$CCGH_HOME/src"
+CCG="$CCGH_HOME/venv/bin/cc-genai-hook"
 "$CCG" --version
 ```
 
@@ -323,9 +331,12 @@ invoke_agent（turn root）
 使用稳定 venv：
 
 ```bash
-python3 -m venv "$HOME/.local/share/cc-genai-hook/venv"
-"$HOME/.local/share/cc-genai-hook/venv/bin/pip" install -U pip setuptools wheel
-"$HOME/.local/share/cc-genai-hook/venv/bin/pip" install "$HOME/Code/cc-genai-hook"
+CCGH_HOME="$HOME/.local/share/cc-genai-hook"
+mkdir -p "$CCGH_HOME"
+git clone https://github.com/clickzetta/cc-genai-hook.git "$CCGH_HOME/src"
+python3 -m venv "$CCGH_HOME/venv"
+"$CCGH_HOME/venv/bin/pip" install -U pip setuptools wheel
+"$CCGH_HOME/venv/bin/pip" install "$CCGH_HOME/src"
 ```
 
 ### Q7. `--mode sidecar` 报错
@@ -343,8 +354,9 @@ sidecar 尚未实现（计划 M4）。当前只支持：
 升级：
 
 ```bash
-git -C "$HOME/Code/cc-genai-hook" pull
-"$HOME/.local/share/cc-genai-hook/venv/bin/pip" install -U "$HOME/Code/cc-genai-hook"
+CCGH_HOME="$HOME/.local/share/cc-genai-hook"
+git -C "$CCGH_HOME/src" pull --ff-only
+"$CCGH_HOME/venv/bin/pip" install -U "$CCGH_HOME/src"
 "$CCG" install --mode command \
   --endpoint "$ENDPOINT" \
   --header "x-api-key=$API_KEY" \
